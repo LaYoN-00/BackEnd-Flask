@@ -43,7 +43,10 @@ def buscarNombre(id):
     sql="SELECT nombre FROM maestros WHERE id = '{0}'".format(id)
     cursor.execute(sql)
     datos=cursor.fetchone()
-    return datos[0]
+    if datos is not None:
+        return datos[0]
+    else:
+        return -1
 
 @app.route('/api/cursos/buscar/<codigo>',methods=['GET'])
 def leer_curso(codigo):
@@ -104,6 +107,22 @@ def actualizar_curso(idCurso):
     except Exception as ex:
         return "ERROR"
 
+@app.route('/api/cursos/codigos/<id>',methods=['GET'])
+def GetCodigosCursos(id):
+    try:
+        nombre=buscarNombre(id)
+        cursor=conexion.connection.cursor()
+        sql="SELECT codigo FROM curso WHERE nombre_profesor='{0}';".format(nombre) 
+        cursor.execute(sql)
+        datos=cursor.fetchall()
+        cursos=[]
+        for fila in datos:
+            curso={'codigo':fila[0]}
+            cursos.append(curso)
+        return jsonify(cursos)
+    except Exception as ex:
+        raise "ERROR"
+
 #RUTAS PARA ENROLARSE A CURSO   
 @app.route('/api/alumnos/curso/alta',methods=['POST'])
 def EnrolarseClase():
@@ -162,7 +181,6 @@ def RegistrarActividad():
         return jsonify({'id':buscarID(profesor)})
     except Exception as ex:
         return "ERROR"
-
 def BuscarIDClase(clase,profesor):
     cursor=conexion.connection.cursor()
     sql="SELECT id_curso FROM curso WHERE codigo='{0}' AND nombre_profesor='{1}'".format(clase,profesor)
@@ -232,29 +250,26 @@ def EvaluarRespuestas(actividad,respuestaDB,respuestaPost):
     datos=cursor.fetchone()
     return datos[0]
 
-@app.route('/api/alumnos/actividad/actualizar/<alumno>/<clase>/<calificacion>',methods=['PUT'])
-def ActualizarCalificaciones(alumno,clase,calificacion):
+@app.route('/api/alumnos/actividad/actualizar/<alumno>',methods=['PUT'])
+def ActualizarCalificaciones(alumno):
     try:
-        acividad=request.json['actividad']
-        tiempo=request.json['tiempo']
-        idactividad=BuscarIDactividad(acividad,clase)
-        registro=IndentificarRegistro(alumno,idactividad)
-        refuerzo=TipoRefuerzo(calificacion,tiempo)
-        profesor=BuscarIDProfesor(clase)
-        print(refuerzo)
-        #print(acividad+'/'+tiempo+'/'+idactividad+'/'+registro+'/'+refuerzo)
+        refuerzo=TipoRefuerzo(request.json['calificacion'],request.json['tiempo'])
+        id_maestro=BuscarIDMaestro_Calificaciones(request.json['id_actividad'])
+        registro=IndentificarRegistro(alumno,request.json['id_actividad'])
         if(registro==0):
             cursor=conexion.connection.cursor()
-            sql="INSERT INTO calificaciones_actividades(id_actividad,id_alumno,id_clase,calificacion,tiempo,refuerzo,id_maestro) VALUES ('{0}','{1}','{2}','{3}','{4}','{5}','{6}')".format(idactividad,alumno,clase,calificacion,tiempo,refuerzo,profesor)
+            sql="INSERT INTO calificaciones_actividades(id_actividad,id_alumno,id_clase,calificacion,tiempo,refuerzo,id_maestro) VALUES ('{0}','{1}','{2}','{3}','{4}','{5}','{6}')".format(request.json['id_actividad'],alumno,request.json['id_clase'],request.json['calificacion'],request.json['tiempo'],refuerzo,id_maestro)
             cursor.execute(sql)
             conexion.connection.commit()
             return jsonify({'mensaje':"NUEVA Calificacion Guardada"})
-        else:
+        if(registro==1):
             cursor=conexion.connection.cursor()
-            sql="UPDATE calificaciones_actividades SET calificacion='{0}', tiempo='{3}', refuerzo='{4}' WHERE id_actividad='{1}' AND id_alumno='{2}'".format(calificacion,idactividad,alumno,tiempo,refuerzo)
+            sql="UPDATE calificaciones_actividades SET calificacion='{0}', tiempo='{3}', refuerzo='{4}' WHERE id_actividad='{1}' AND id_alumno='{2}'".format(request.json['calificacion'],request.json['id_actividad'],alumno,request.json['tiempo'],refuerzo)
             cursor.execute(sql)
             conexion.connection.commit()
-            return jsonify({'mensaje':"ACTULIZACION Calificacion Guardada"})
+            return jsonify({'mensaje':"ACTULIZACION de Calificacion Guardada"})
+        else:
+            return jsonify({'mensaje':"ERROR"})
     except Exception as ex:
         return "ERROR"
 def TipoRefuerzo(calificacion,tiempo):
@@ -264,25 +279,19 @@ def TipoRefuerzo(calificacion,tiempo):
         return "PRACTICA"
     else:
         return "RENDIMIENTO OPTIMO"    
-def BuscarIDactividad(actividad,clase):
+def BuscarIDMaestro_Calificaciones(id_actividad):
     cursor=conexion.connection.cursor()
-    sql="SELECT id_actividad FROM actividades_clase WHERE nombre_actividad={0} AND id_curso={1}".format(actividad,clase)
+    sql="SELECT nombre_profesor FROM actividades_clase WHERE id_actividad={0}".format(id_actividad)
     cursor.execute(sql)
     datos=cursor.fetchone()
-    return datos[0]
+    return buscarID(datos[0])
 def IndentificarRegistro(alumno,actividad):
     cursor=conexion.connection.cursor()
     sql="SELECT EXISTS (SELECT 1 FROM calificaciones_actividades WHERE id_alumno = {0} AND id_actividad = {1}) AS resultado".format(alumno,actividad)
     cursor.execute(sql)
     datos=cursor.fetchone()
     return datos[0]
-def BuscarIDProfesor(clase):
-    cursor=conexion.connection.cursor()
-    sql="SELECT nombre_profesor FROM curso WHERE id_curso='{0}'".format(clase)
-    cursor.execute(sql)
-    datos=cursor.fetchone()
-    id=buscarID(datos[0])
-    return id
+
 #RUTAS PARA LA TABLA CALIFICACIONES
 @app.route('/api/alumnos/calificaciones/<alumno>',methods=['GET'])
 def Calificaciones(alumno):
@@ -861,8 +870,21 @@ def EnviarRespuesta(topico):
 def RedNeuronalv1():
     try:
         warnings.filterwarnings('ignore', category=UserWarning, module='keras')
-        ecuaciones=np.array([[1,18,21],[1,2,10],[1,5,4],[1,5,10],[1,2,3],[1,2,8],],dtype=float)
-        resultados=np.array([3,8,-1,5,1,6,],dtype=float)
+        if(request.json['coeficiente']==1):    
+            ecuaciones=np.array([[1,18,21],[1,2,10],[1,5,4],[1,5,10],[1,2,3],[1,2,8],],dtype=float)
+            resultados=np.array([3,8,-1,5,1,6,],dtype=float)
+        if(request.json['coeficiente']==2):
+            ecuaciones=np.array([[2,2,2],[2,-7,7],[2,7,1],[2,2,-8],[2,3,-5],],dtype=float)
+            resultados=np.array([0,7,-3,-5,-4],dtype=float)
+        if(request.json['coeficiente']==3):
+            ecuaciones=np.array([[3,3,6],[3,15,9],[3,4,16],[3,-19,2],[3,5,-13],[3,-5,4],],dtype=float)
+            resultados=np.array([1,-2,4,7,-6,3],dtype=float)
+        if(request.json['coeficiente']==4):
+            ecuaciones=np.array([[4,2,6],[4,2,2],[4,-17,-1],[4,-9,15],[4,15,-5],],dtype=float)
+            resultados=np.array([1,0,4,6,-5],dtype=float)
+        if(request.json['coeficiente']==5):
+            ecuaciones=np.array([[5,27,12],[5,-6,-6],[5,-3,7],[5,22,-3],[5,5,0],],dtype=float)
+            resultados=np.array([-3,0,2,-5,-1],dtype=float)
         oculta_1=tf.keras.layers.Dense(units=3,input_shape=[3])
         oculta_2=tf.keras.layers.Dense(units=3)
         salida=tf.keras.layers.Dense(units=1)
@@ -966,6 +988,39 @@ def logginAlumno():
     except Exception as ex:
          return "ERROR"
 
+@app.route('/api/maestros/confirmacion/<id>',methods=['GET'])
+def MaestroConfirmacion(id):
+    try:
+        maestro=buscarNombre(id)
+        if(maestro==-1):
+            confirmacion="False"
+        else:
+            confirmacion=maestro
+        return jsonify({'confirmacion': confirmacion})
+    except Exception as ex:
+        return 'ERROR'
+
+@app.route('/api/alumnos/confirmacion/<id>',methods=['GET'])
+def AlumnosConfirmacion(id):
+    try:
+        alumno=buscarNombreEstudiante(id)
+        if(alumno==-1):
+            confirmacion="False"
+        else:
+            confirmacion=alumno
+        return jsonify({'confirmacion': confirmacion})
+    except Exception as ex:
+        return 'ERROR'
+def buscarNombreEstudiante(id):
+    cursor=conexion.connection.cursor()
+    sql="SELECT nombre FROM alumnos WHERE id = '{0}'".format(id)
+    cursor.execute(sql)
+    datos=cursor.fetchone()
+    if datos is not None:
+        return datos[0]
+    else:
+        return -1
+    
 def pagina_no_encontada(error):
     return "<h1>PAGINA NO ENCONTRADA...</h1>",404
 
